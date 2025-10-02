@@ -12,3 +12,100 @@ da7e112c7c20096adade4f719b0af062efdc1fafd6efcb814d05c93ab767f279
 2b5a2b4b34d4d00a9aac5b87d45a4863a9d16a0c91a7bf520ac386da4c17e8c2
 516d027e25a0deffe4d59019e3c559f6f24d57ce87e6fb48c10a90fc463ac078
 2b5a2b4b34d4d00a9aac5b87d45a4863a9d16a0c91a7bf520ac386da4c17e8c2
+
+-- Speed GUI (LocalScript) - wklej do StarterPlayerScripts lub StarterGui
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local lp = Players.LocalPlayer
+local playerGui = lp:WaitForChild("PlayerGui")
+
+-- USTAWIENIA
+local MIN_SPEED = 16
+local MAX_SPEED = 100
+local DEFAULT_SPEED = 16
+local START_SPEED = 30 -- startowa wartość na sliderze
+
+-- STAN
+local enabled = false
+local desiredSpeed = math.clamp(START_SPEED, MIN_SPEED, MAX_SPEED)
+
+-- Pomocnicze: pobierz aktualny Humanoid
+local function getHumanoid(character)
+	character = character or lp.Character
+	if not character then return nil end
+	return character:FindFirstChildOfClass("Humanoid")
+end
+
+-- Zastosuj prędkość (wywoływane, gdy włączone)
+local function applySpeed()
+	if not enabled then return end
+	local hum = getHumanoid()
+	if hum then
+		hum.WalkSpeed = desiredSpeed
+	end
+end
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "SpeedGUI"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Name = "Window"
+frame.Size = UDim2.fromOffset(260, 140)
+frame.Position = UDim2.new(0.5, -130, 0.5, -70)
+frame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local corner = Instance.new("UICorner", frame); corner.CornerRadius = UDim.new(0, 8)
+
+local title = Instance.new("TextLabel")
+title.BackgroundTransparency = 1
+title.Size = UDim2.new(1, -16, 0, 24)
+title.Position = UDim2.new(0, 8, 0, 8)
+title.Font = Enum.Font.GothamBold
+title.Text = "Speed"
+title.TextSize = 18
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = frame
+
+-- Drag window
+do
+	local dragging, dragStart, startPos
+	frame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			local relY = UserInputService:GetMouseLocation().Y - frame.AbsolutePosition.Y
+			-- drag tylko po pasku tytułu (pierwsze ~32px)
+			if relY <= 32 then
+				dragging = true
+				dragStart = input.Position
+				startPos = frame.Position
+				input.Changed:Connect(function()
+					if input.UserInputState == Enum.UserInputState.End then
+						dragging = false
+					end
+				end)
+			end
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+-- Slider UI
+local sliderLabel = Instance.new("TextLabel")
+sliderLabel.BackgroundTransparency = 1
+sliderLabel.Size = UDim2.new(1, -16, 0, 20)
+sliderLabel.Position = UDim2.new(0, 8, 0, 44)
+sliderLabel.Font = Enum
