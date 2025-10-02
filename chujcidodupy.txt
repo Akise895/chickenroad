@@ -13,7 +13,8 @@ da7e112c7c20096adade4f719b0af062efdc1fafd6efcb814d05c93ab767f279
 516d027e25a0deffe4d59019e3c559f6f24d57ce87e6fb48c10a90fc463ac078
 2b5a2b4b34d4d00a9aac5b87d45a4863a9d16a0c91a7bf520ac386da4c17e8c2
 
--- Speed GUI (LocalScript) - wklej do StarterPlayerScripts lub StarterGui
+-- Speed + Fly-to-Player GUI (LocalScript)
+-- Wklej do StarterPlayerScripts lub StarterGui
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -23,46 +24,66 @@ local lp = Players.LocalPlayer
 local playerGui = lp:WaitForChild("PlayerGui")
 
 -- USTAWIENIA
-local MIN_SPEED = 16
-local MAX_SPEED = 100
-local DEFAULT_SPEED = 16
-local START_SPEED = 30 -- startowa wartość na sliderze
+local MIN_WALK = 16
+local MAX_WALK = 100
+local DEFAULT_WALK = 16
+local START_WALK = 30
+
+local FLY_MIN = 50
+local FLY_MAX = 400
+local FLY_START = 200
 
 -- STAN
-local enabled = false
-local desiredSpeed = math.clamp(START_SPEED, MIN_SPEED, MAX_SPEED)
+local speedEnabled = false
+local desiredWalk = math.clamp(START_WALK, MIN_WALK, MAX_WALK)
 
--- Pomocnicze: pobierz aktualny Humanoid
-local function getHumanoid(character)
-	character = character or lp.Character
-	if not character then return nil end
-	return character:FindFirstChildOfClass("Humanoid")
+local flyEnabled = false
+local flySpeed = math.clamp(FLY_START, FLY_MIN, FLY_MAX)
+local flyConn -- RBXScriptConnection
+local targetName = ""
+
+-- Helpers
+local function getCharacter()
+	return lp.Character or lp.CharacterAdded:Wait()
 end
 
--- Zastosuj prędkość (wywoływane, gdy włączone)
-local function applySpeed()
-	if not enabled then return end
-	local hum = getHumanoid()
-	if hum then
-		hum.WalkSpeed = desiredSpeed
+local function getHumanoid(char)
+	char = char or getCharacter()
+	return char:FindFirstChildOfClass("Humanoid")
+end
+
+local function getHRP(char)
+	char = char or getCharacter()
+	return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function findPlayerByName(partial)
+	if not partial or partial == "" then return nil end
+	partial = partial:lower()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= lp then
+			if plr.Name:lower():find(partial, 1, true) or (plr.DisplayName and plr.DisplayName:lower():find(partial, 1, true)) then
+				return plr
+			end
+		end
 	end
+	return nil
 end
 
 -- GUI
 local gui = Instance.new("ScreenGui")
-gui.Name = "SpeedGUI"
+gui.Name = "SpeedFlyGUI"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = playerGui
 
 local frame = Instance.new("Frame")
 frame.Name = "Window"
-frame.Size = UDim2.fromOffset(260, 140)
-frame.Position = UDim2.new(0.5, -130, 0.5, -70)
+frame.Size = UDim2.fromOffset(320, 220)
+frame.Position = UDim2.new(0.5, -160, 0.5, -110)
 frame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 frame.BorderSizePixel = 0
 frame.Parent = gui
-
 local corner = Instance.new("UICorner", frame); corner.CornerRadius = UDim.new(0, 8)
 
 local title = Instance.new("TextLabel")
@@ -70,19 +91,18 @@ title.BackgroundTransparency = 1
 title.Size = UDim2.new(1, -16, 0, 24)
 title.Position = UDim2.new(0, 8, 0, 8)
 title.Font = Enum.Font.GothamBold
-title.Text = "Speed"
+title.Text = "Speed + Fly"
 title.TextSize = 18
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = frame
 
--- Drag window
+-- Drag window (po pasku tytułu ~32px)
 do
 	local dragging, dragStart, startPos
 	frame.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			local relY = UserInputService:GetMouseLocation().Y - frame.AbsolutePosition.Y
-			-- drag tylko po pasku tytułu (pierwsze ~32px)
 			if relY <= 32 then
 				dragging = true
 				dragStart = input.Position
@@ -103,9 +123,291 @@ do
 	end)
 end
 
--- Slider UI
-local sliderLabel = Instance.new("TextLabel")
-sliderLabel.BackgroundTransparency = 1
-sliderLabel.Size = UDim2.new(1, -16, 0, 20)
-sliderLabel.Position = UDim2.new(0, 8, 0, 44)
-sliderLabel.Font = Enum
+-- Budowniczy slidera
+local function makeSlider(parent, pos, size, minV, maxV, startV, labelText, color)
+	local container = Instance.new("Frame")
+	container.BackgroundTransparency = 1
+	container.Position = pos
+	container.Size = size
+	container.Parent = parent
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.new(1, -16, 0, 20)
+	label.Position = UDim2.new(0, 8, 0, 0)
+	label.Font = Enum.Font.Gotham
+	label.TextSize = 16
+	label.TextColor3 = Color3.fromRGB(220, 220, 220)
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Text = labelText .. ": " .. tostring(startV)
+	label.Parent = container
+
+	local bar = Instance.new("Frame")
+	bar.Size = UDim2.new(1, -32, 0, 8)
+	bar.Position = UDim2.new(0, 16, 0, 26)
+	bar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	bar.BorderSizePixel = 0
+	bar.Parent = container
+	Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 4)
+
+	local fill = Instance.new("Frame")
+	fill.BackgroundColor3 = color or Color3.fromRGB(0, 170, 255)
+	fill.BorderSizePixel = 0
+	fill.Size = UDim2.fromScale((startV - minV) / (maxV - minV), 1)
+	fill.Parent = bar
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
+
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.fromOffset(14, 14)
+	knob.AnchorPoint = Vector2.new(0.5, 0.5)
+	knob.Position = UDim2.new((startV - minV) / (maxV - minV), 0, 0.5, 0)
+	knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	knob.BorderSizePixel = 0
+	knob.Parent = bar
+	Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+	local value = math.clamp(startV, minV, maxV)
+	local draggingKnob = false
+
+	local function setFromRatio(ratio)
+		ratio = math.clamp(ratio, 0, 1)
+		value = math.floor(minV + ratio * (maxV - minV) + 0.5)
+		fill.Size = UDim2.fromScale(ratio, 1)
+		knob.Position = UDim2.new(ratio, 0, 0.5, 0)
+		label.Text = ("%s: %d"):format(labelText, value)
+	end
+
+	knob.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			draggingKnob = true
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					draggingKnob = false
+				end
+			end)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if draggingKnob and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local ratio = (UserInputService:GetMouseLocation().X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X
+			setFromRatio(ratio)
+		end
+	end)
+	bar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			local ratio = (UserInputService:GetMouseLocation().X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X
+			setFromRatio(ratio)
+		end
+	end)
+
+	return {
+		Get = function() return value end,
+		Set = function(v)
+			v = math.clamp(v, minV, maxV)
+			setFromRatio((v - minV) / (maxV - minV))
+		end,
+		Label = label,
+		Bar = bar,
+		Container = container
+	}
+end
+
+-- Sekcja SPEED
+local speedSection = Instance.new("TextLabel")
+speedSection.BackgroundTransparency = 1
+speedSection.Size = UDim2.new(1, -16, 0, 18)
+speedSection.Position = UDim2.new(0, 8, 0, 36)
+speedSection.Font = Enum.Font.GothamBold
+speedSection.Text = "SPEED"
+speedSection.TextSize = 14
+speedSection.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedSection.TextXAlignment = Enum.TextXAlignment.Left
+speedSection.Parent = frame
+
+local speedSlider = makeSlider(frame, UDim2.new(0, 8, 0, 56), UDim2.fromOffset(304, 40), MIN_WALK, MAX_WALK, desiredWalk, "WalkSpeed", Color3.fromRGB(0, 170, 255))
+
+local speedToggle = Instance.new("TextButton")
+speedToggle.Size = UDim2.new(0, 132, 0, 32)
+speedToggle.Position = UDim2.new(0, 8, 0, 100)
+speedToggle.Text = "Speed: OFF"
+speedToggle.Font = Enum.Font.GothamBold
+speedToggle.TextSize = 16
+speedToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedToggle.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+speedToggle.AutoButtonColor = false
+speedToggle.BorderSizePixel = 0
+speedToggle.Parent = frame
+Instance.new("UICorner", speedToggle).CornerRadius = UDim.new(0, 6)
+
+local function updateSpeedToggleVisual()
+	if speedEnabled then
+		speedToggle.Text = "Speed: ON"
+		speedToggle.BackgroundColor3 = Color3.fromRGB(50, 170, 70)
+	else
+		speedToggle.Text = "Speed: OFF"
+		speedToggle.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+	end
+end
+
+speedToggle.MouseButton1Click:Connect(function()
+	speedEnabled = not speedEnabled
+	updateSpeedToggleVisual()
+	if speedEnabled then
+		local hum = getHumanoid()
+		if hum then hum.WalkSpeed = speedSlider.Get() end
+	else
+		local hum = getHumanoid()
+		if hum then hum.WalkSpeed = DEFAULT_WALK end
+	end
+end)
+updateSpeedToggleVisual()
+
+-- Utrzymanie WalkSpeed
+RunService.Heartbeat:Connect(function()
+	if speedEnabled then
+		local hum = getHumanoid()
+		if hum then
+			desiredWalk = speedSlider.Get()
+			if hum.WalkSpeed ~= desiredWalk then
+				hum.WalkSpeed = desiredWalk
+			end
+		end
+	end
+end)
+
+lp.CharacterAdded:Connect(function(char)
+	char:WaitForChild("Humanoid")
+	if speedEnabled then
+		task.wait()
+		local hum = getHumanoid(char)
+		if hum then hum.WalkSpeed = speedSlider.Get() end
+	end
+	-- zatrzymaj ewentualny lot na resp
+	if flyEnabled and flyConn then
+		flyConn:Disconnect()
+		flyConn = nil
+	end
+	flyEnabled = false
+end)
+
+-- Sekcja FLY TO PLAYER
+local flySection = Instance.new("TextLabel")
+flySection.BackgroundTransparency = 1
+flySection.Size = UDim2.new(1, -16, 0, 18)
+flySection.Position = UDim2.new(0, 8, 0, 140)
+flySection.Font = Enum.Font.GothamBold
+flySection.Text = "FLY TO PLAYER"
+flySection.TextSize = 14
+flySection.TextColor3 = Color3.fromRGB(255, 255, 255)
+flySection.TextXAlignment = Enum.TextXAlignment.Left
+flySection.Parent = frame
+
+local nameBox = Instance.new("TextBox")
+nameBox.Size = UDim2.new(0, 160, 0, 28)
+nameBox.Position = UDim2.new(0, 8, 0, 160)
+nameBox.PlaceholderText = "Nazwa gracza"
+nameBox.ClearTextOnFocus = false
+nameBox.Font = Enum.Font.Gotham
+nameBox.TextSize = 16
+nameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+nameBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+nameBox.BorderSizePixel = 0
+nameBox.Parent = frame
+Instance.new("UICorner", nameBox).CornerRadius = UDim.new(0, 6)
+
+local flySlider = makeSlider(frame, UDim2.new(0, 176, 0, 156), UDim2.fromOffset(136, 40), FLY_MIN, FLY_MAX, flySpeed, "FlySpeed", Color3.fromRGB(255, 170, 0))
+
+local flyBtn = Instance.new("TextButton")
+flyBtn.Size = UDim2.new(0, 120, 0, 32)
+flyBtn.Position = UDim2.new(0, 8, 0, 192)
+flyBtn.Text = "Fly"
+flyBtn.Font = Enum.Font.GothamBold
+flyBtn.TextSize = 16
+flyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+flyBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+flyBtn.AutoButtonColor = true
+flyBtn.BorderSizePixel = 0
+flyBtn.Parent = frame
+Instance.new("UICorner", flyBtn).CornerRadius = UDim.new(0, 6)
+
+local stopBtn = Instance.new("TextButton")
+stopBtn.Size = UDim2.new(0, 120, 0, 32)
+stopBtn.Position = UDim2.new(0, 136, 0, 192)
+stopBtn.Text = "Stop"
+stopBtn.Font = Enum.Font.GothamBold
+stopBtn.TextSize = 16
+stopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+stopBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+stopBtn.AutoButtonColor = true
+stopBtn.BorderSizePixel = 0
+stopBtn.Parent = frame
+Instance.new("UICorner", stopBtn).CornerRadius = UDim.new(0, 6)
+
+local function stopFlight()
+	flyEnabled = false
+	if flyConn then
+		flyConn:Disconnect()
+		flyConn = nil
+	end
+	local hrp = getHRP()
+	if hrp then
+		hrp.AssemblyLinearVelocity = Vector3.zero
+	end
+end
+
+local function startFlight(targetPlayer)
+	stopFlight()
+	local char = getCharacter()
+	local hrp = getHRP(char)
+	local hum = getHumanoid(char)
+	if not (hrp and hum) then return end
+
+	flyEnabled = true
+	flyConn = RunService.Heartbeat:Connect(function(dt)
+		if not flyEnabled then return end
+		flySpeed = flySlider.Get()
+
+		-- odśwież targeta
+		if not targetPlayer or not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+			stopFlight()
+			return
+		end
+		local targetHRP = targetPlayer.Character.HumanoidRootPart
+
+		-- pozycje
+		hrp = getHRP() or hrp
+		if not hrp then stopFlight() return end
+
+		local diff = targetHRP.Position - hrp.Position
+		local dist = diff.Magnitude
+		if dist < 4 then
+			-- dotarliśmy
+			stopFlight()
+			return
+		end
+
+		local dir = diff.Unit
+		-- ustaw prędkość całego ciała w kierunku celu
+		hrp.AssemblyLinearVelocity = dir * flySpeed
+
+		-- opcjonalne wygaszanie przy bardzo małej odległości
+		if dist < 12 and flySpeed > 120 then
+			hrp.AssemblyLinearVelocity = dir * math.max(80, flySpeed * 0.5)
+		end
+	end)
+end
+
+flyBtn.MouseButton1Click:Connect(function()
+	targetName = nameBox.Text or ""
+	local p = findPlayerByName(targetName)
+	if p then
+		startFlight(p)
+	else
+		-- brak dopasowania: zatrzymaj lot
+		stopFlight()
+	end
+end)
+
+stopBtn.MouseButton1Click:Connect(function()
+	stopFlight()
+end)
